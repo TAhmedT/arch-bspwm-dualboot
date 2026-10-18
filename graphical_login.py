@@ -8,6 +8,7 @@ import shutil
 import sys
 
 from arch_setup import HERE, load_state, root_required, run, write
+from keybindings import LAYOUT_COMMAND, alt_hotkeys, configure_user as configure_hotkeys
 
 PACKAGES = ['lightdm', 'lightdm-gtk-greeter', 'light-locker', 'adw-gtk-theme',
             'accountsservice', 'librsvg']
@@ -43,9 +44,7 @@ clock-format=%a, %d %b  %H:%M
 screensaver-timeout=0
 '''
 
-LAYOUT = '''#!/bin/sh
-exec /usr/bin/setxkbmap -layout us,ru -option grp:alt_shift_toggle
-'''
+LAYOUT = '#!/bin/sh\nexec /usr/bin/' + LAYOUT_COMMAND + '\n'
 
 SESSION = '''#!/bin/sh
 if [ -d /etc/X11/xinit/xinitrc.d ]; then
@@ -58,7 +57,7 @@ export PATH="$HOME/bin:$PATH"
 export XDG_CURRENT_DESKTOP=bspwm
 export XDG_SESSION_DESKTOP=bspwm
 export XDG_SESSION_TYPE=x11
-setxkbmap -layout us,ru -option grp:alt_shift_toggle
+''' + LAYOUT_COMMAND + '''
 dbus-update-activation-environment --systemd DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 if [ -n "${XDG_SESSION_PATH:-}" ]; then
     light-locker --lock-on-suspend --no-late-locking &
@@ -103,11 +102,12 @@ def configure_user(home, *, backup=True):
     keys = home / '.config/sxhkd/sxhkdrc'
     _validate_destinations((keys, home / 'bin/screen-lock', home / 'bin/powermenu'))
     text = keys.read_text() if keys.exists() else ''
+    text = alt_hotkeys(text)
     # Preserve the upstream brace-expanded binding and all other shortcuts.
     text = text.replace('sh $HOME/bin/screen-lock', '"$HOME/bin/screen-lock"')
-    text = re.sub(r'(?m)^super\s*\+\s*shift\s*\+\s*l[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+', '', text)
+    text = re.sub(r'(?m)^alt\s*\+\s*shift\s*\+\s*l[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+', '', text)
     if 'bin/screen-lock' not in text:
-        text = text.rstrip() + '\n\nsuper + shift + l\n    "$HOME/bin/screen-lock"\n'
+        text = text.rstrip() + '\n\nalt + shift + l\n    "$HOME/bin/screen-lock"\n'
     updates = {home / 'bin/screen-lock': (SCREEN_LOCK, 0o755),
                home / 'bin/powermenu': (POWER_MENU, 0o755), keys: (text, 0o644)}
     _install_files(updates, home / 'dotfiles-backups', home, backup=backup)
@@ -170,6 +170,19 @@ def configure_system():
     run(['systemctl', 'set-default', 'graphical.target'])
 
 
+def configure_system_keyboard():
+    root_required()
+    load_state()
+    if Path('/run/archiso').is_dir():
+        raise RuntimeError('Раскладка настраивается в установленной системе.')
+    paths = {'usr/local/libexec/arch-greeter-layout': LAYOUT,
+             'usr/local/bin/arch-bspwm-session': SESSION}
+    if not all(Path('/' + path).is_file() for path in paths):
+        raise RuntimeError('Сначала выполните gui для настройки LightDM.')
+    updates = {Path('/' + path): (text, 0o755) for path, text in paths.items()}
+    _install_files(updates, Path('/var/backups/arch-dualboot'), Path('/'))
+
+
 def setup(*, install_packages=True):
     if sys.platform != 'linux' or os.geteuid() == 0:
         raise RuntimeError('Запускайте gui из своего Linux-пользователя, БЕЗ sudo.')
@@ -183,16 +196,21 @@ def setup(*, install_packages=True):
         run(['sudo', 'pacman', '-Syu', '--needed', *PACKAGES])
     run(['sudo', 'python3', HERE / 'graphical_login.py', '--system'])
     configure_user(Path.home())
+    configure_hotkeys(Path.home())
     print('Графический вход готов. При следующей загрузке выберите сеанс Arch BSPWM.')
-    print('Win+Shift+L откроет экран входа с паролем после входа через LightDM.')
+    print('Alt+Shift+L откроет экран входа с паролем после входа через LightDM. Раскладка: правый Alt.')
     print('Сохраните работу и перезагрузитесь, когда будет удобно.')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--system', action='store_true')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--system', action='store_true')
+    group.add_argument('--keyboard', action='store_true')
     args = parser.parse_args()
     if args.system:
         configure_system()
+    elif args.keyboard:
+        configure_system_keyboard()
     else:
         setup()

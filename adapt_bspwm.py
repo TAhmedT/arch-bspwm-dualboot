@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 from graphical_login import configure_user
+from keybindings import LAYOUT_COMMAND, configure_user as configure_hotkeys
 
 CONFIGS = ('alacritty', 'bspwm', 'polybar', 'rofi', 'sxhkd', 'fish',
            'flameshot', 'gtk-2.0', 'gtk-3.0', 'gtk-4.0', 'lsd', 'zathura')
@@ -125,6 +126,7 @@ label-disconnected =
     text = text.replace('# Run on the desired monitor', "export ETH_IFACE=$(ip -o route show default | awk '{print $5; exit}')\n# Run on the desired monitor")
     write(launch, text, True)
     configure_user(home, backup=False)
+    configure_hotkeys(home, backup=False)
     write(home / 'bin/clipboard-menu', '#!/usr/bin/env bash\nexport CM_LAUNCHER=rofi\nexec clipmenu\n', True)
     write(home / 'bin/wifimenu', '#!/usr/bin/env bash\nexec alacritty -e nmtui\n', True)
     write(home / '.xinitrc', '''#!/bin/sh
@@ -135,7 +137,7 @@ if [ -d /etc/X11/xinit/xinitrc.d ]; then
     unset f
 fi
 export PATH="$HOME/bin:$PATH"
-setxkbmap -layout us,ru -option grp:alt_shift_toggle
+''' + LAYOUT_COMMAND + '''
 exec bspwm
 ''', True)
     for path in (home / 'bin').rglob('*'):

@@ -6,6 +6,7 @@ import io
 import json
 import configparser
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -18,6 +19,7 @@ import ubuntu_shim
 import zfs_support
 import storage
 import graphical_login as graphical
+import keybindings
 import xml.etree.ElementTree as ET
 
 
@@ -354,7 +356,7 @@ class GraphicalLogin(unittest.TestCase):
             bspwm.write_text('personal desktop settings\n')
             graphical.configure_user(home)
             self.assertEqual(bspwm.read_text(), 'personal desktop settings\n')
-            self.assertIn('super + shift + {k,l}', keys.read_text())
+            self.assertIn('alt + shift + {k,l}', keys.read_text())
             self.assertEqual(keys.read_text().count('bin/screen-lock'), 1)
             saved = next((home / 'dotfiles-backups').iterdir())
             self.assertEqual((saved / '.config/sxhkd/sxhkdrc').read_text(), original)
@@ -437,6 +439,118 @@ class GraphicalLogin(unittest.TestCase):
         self.assertIn(['systemctl', 'enable', 'lightdm.service'], calls)
         self.assertIn(['systemctl', 'set-default', 'graphical.target'], calls)
         self.assertFalse(any(value in args for args in calls for value in ('--now', 'start', 'restart')))
+
+
+class AltBindings(unittest.TestCase):
+    def test_commands_are_preserved_and_expanded_shortcuts_do_not_collide(self):
+        text = '''# super is a modifier, not a command substitution
+super + Escape + r
+    pkill -USR1 -x sxhkd
+super + Return
+    echo super mod4 alt
+Alt_L + shift
+    sh $HOME/bin/change_language.sh
+Shift_L + alt
+    sh $HOME/bin/change_language.sh
+super + shift + {k,l}
+    {alacritty,sh $HOME/bin/screen-lock}
+super + control {h,j,k,l}
+    bspc node -z {left -20 0,right 20 0,top 0 -20,bottom 0 20}
+super + {_,alt + }{h,j,k,l}
+    bspc node -{f,s} {west,south,north,east}
+super + {_,shift + }{1-9,0}
+    bspc {desktop -f,node -d} '^{1-9,10}'
+alt + {_,shift + }Tab
+    bspc node -f {next.local,prev.local}
+super + {grave,Tab}
+    bspc {node,desktop} -f last
+'''
+        updated = keybindings.alt_hotkeys(text)
+        self.assertIn('    echo super mod4 alt\n', updated)
+        self.assertIn('alt + Escape\n', updated)
+        self.assertIn('alt + {grave,ctrl + Tab}\n', updated)
+        self.assertNotIn('change_language.sh', updated)
+        self.assertIn('alt + control + {h,j,k,l}', updated)
+        self.assertIn('alt + {_,ctrl + shift + }{h,j,k,l}', updated)
+        self.assertEqual(keybindings.alt_hotkeys(updated), updated)
+
+        def expand(line):
+            match = re.search(r'\{([^{}]*)\}', line)
+            if match is None:
+                return [line]
+            values = []
+            for value in match[1].split(','):
+                if re.fullmatch(r'\d-\d', value):
+                    values.extend(map(str, range(int(value[0]), int(value[2]) + 1)))
+                else:
+                    values.append('' if value == '_' else value)
+            return [expanded for value in values
+                    for expanded in expand(line[:match.start()] + value + line[match.end():])]
+
+        seen = set()
+        for line in updated.splitlines():
+            if not line or line[0].isspace() or line.startswith('#'):
+                continue
+            for header in expand(line):
+                tokens = [token.strip().replace('control', 'ctrl') for token in header.split('+')]
+                self.assertEqual(len(tokens[:-1]), len(set(tokens[:-1])), header)
+                signature = (tuple(sorted(tokens[:-1])), tokens[-1])
+                self.assertNotIn(signature, seen, header)
+                seen.add(signature)
+
+    def test_migration_backs_up_configs_and_preserves_other_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            keys = home / '.config/sxhkd/sxhkdrc'
+            bspwm = home / '.config/bspwm/bspwmrc'
+            keys.parent.mkdir(parents=True)
+            bspwm.parent.mkdir(parents=True)
+            keys.write_text('super + Return\n    alacritty\n')
+            bspwm.write_text('#!/bin/sh\nbspc config pointer_modifier mod4\n# personal settings\n')
+            bspwm.chmod(0o755)
+            (home / '.xinitrc').write_text('setxkbmap -layout us,ru -option grp:alt_shift_toggle\nexec bspwm\n')
+            (home / 'personal.txt').write_text('unchanged')
+            keybindings.configure_user(home)
+            saved = next((home / 'dotfiles-backups').iterdir())
+            self.assertIn('super + Return', (saved / '.config/sxhkd/sxhkdrc').read_text())
+            self.assertIn('pointer_modifier mod1', bspwm.read_text())
+            self.assertIn('# personal settings', bspwm.read_text())
+            self.assertEqual(bspwm.stat().st_mode & 0o777, 0o755)
+            self.assertIn('grp:toggle', (home / '.xinitrc').read_text())
+            self.assertNotIn('alt_shift_toggle', (home / '.xinitrc').read_text())
+            self.assertEqual((home / 'personal.txt').read_text(), 'unchanged')
+            before = bspwm.read_text()
+            keybindings.configure_user(home)
+            self.assertEqual(bspwm.read_text(), before)
+            self.assertEqual(len(list((home / 'dotfiles-backups').iterdir())), 1)
+            subprocess.run(['sh', '-n', str(bspwm)], check=True)
+
+    def test_greeter_keyboard_update_does_not_reconfigure_or_restart_lightdm(self):
+        with patch.object(graphical, 'root_required'), patch.object(graphical, 'load_state'), \
+             patch.object(Path, 'is_dir', return_value=False), \
+             patch.object(Path, 'is_file', return_value=True), \
+             patch.object(graphical, '_install_files') as install, patch.object(graphical, 'run') as command:
+            graphical.configure_system_keyboard()
+        paths = install.call_args.args[0]
+        self.assertEqual(set(paths), {Path('/usr/local/bin/arch-bspwm-session'),
+                                      Path('/usr/local/libexec/arch-greeter-layout')})
+        for text, mode in paths.values():
+            self.assertIn('grp:toggle', text)
+            self.assertNotIn('grp:alt_shift_toggle', text)
+        command.assert_not_called()
+
+    def test_live_update_reloads_only_the_users_hotkeys_without_restarting_bspwm(self):
+        with patch.object(keybindings.sys, 'platform', 'linux'), \
+             patch.object(keybindings.os, 'geteuid', return_value=1000), \
+             patch.dict(os.environ, {'DISPLAY': ':99'}), \
+             patch.object(keybindings, 'configure_user'), patch.object(Path, 'is_file', return_value=False), \
+             patch.object(keybindings, 'run', return_value=0) as command:
+            keybindings.setup()
+        calls = [call.args[0] for call in command.call_args_list]
+        self.assertIn(['bspc', 'config', 'pointer_modifier', 'mod1'], calls)
+        self.assertIn(['pkill', '-USR1', '-u', '1000', '-x', 'sxhkd'], calls)
+        self.assertIn(['setxkbmap', '-layout', 'us,ru', '-option', '', '-option', 'grp:toggle'], calls)
+        self.assertFalse(any('restart' in args or 'wm' in args for args in calls))
 
 
 class DesktopFiles(unittest.TestCase):
