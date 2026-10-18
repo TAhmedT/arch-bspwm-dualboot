@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sys
+from graphical_login import configure_user
 
 CONFIGS = ('alacritty', 'bspwm', 'polybar', 'rofi', 'sxhkd', 'fish',
            'flameshot', 'gtk-2.0', 'gtk-3.0', 'gtk-4.0', 'lsd', 'zathura')
@@ -123,23 +124,7 @@ label-disconnected =
     text = launch.read_text(encoding='utf-8')
     text = text.replace('# Run on the desired monitor', "export ETH_IFACE=$(ip -o route show default | awk '{print $5; exit}')\n# Run on the desired monitor")
     write(launch, text, True)
-    # Basic lock uses the official i3lock package, with no AUR dependency.
-    write(home / 'bin/screen-lock', '''#!/usr/bin/env bash
-set -eu
-pkill -STOP -x sxhkd || true
-trap 'pkill -CONT -x sxhkd || true' EXIT
-i3lock -n -c 1e1e2e
-''', True)
-    write(home / 'bin/powermenu', '''#!/usr/bin/env bash
-choice=$(printf 'Lock\\nLogout\\nSuspend\\nReboot\\nShutdown\\n' | rofi -dmenu -p Power)
-case "$choice" in
-  Lock) "$HOME/bin/screen-lock" ;;
-  Logout) bspc quit ;;
-  Suspend) i3lock -c 1e1e2e && systemctl suspend ;;
-  Reboot) systemctl reboot ;;
-  Shutdown) systemctl poweroff ;;
-esac
-''', True)
+    configure_user(home, backup=False)
     write(home / 'bin/clipboard-menu', '#!/usr/bin/env bash\nexport CM_LAUNCHER=rofi\nexec clipmenu\n', True)
     write(home / 'bin/wifimenu', '#!/usr/bin/env bash\nexec alacritty -e nmtui\n', True)
     write(home / '.xinitrc', '''#!/bin/sh
@@ -157,7 +142,7 @@ exec bspwm
         if path.is_file() and not path.is_symlink():
             path.chmod(path.stat().st_mode | 0o100)
     print(f'Done. Backups: {backup}')
-    print('Run startx from a local tty as your normal user.')
+    print('Use the Arch BSPWM session in LightDM after graphical login setup.')
 
 
 def main():

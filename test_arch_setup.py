@@ -4,6 +4,8 @@ from hashlib import sha256
 from pathlib import Path
 import io
 import json
+import configparser
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -15,6 +17,8 @@ import adapt_bspwm
 import ubuntu_shim
 import zfs_support
 import storage
+import graphical_login as graphical
+import xml.etree.ElementTree as ET
 
 
 def adata():
@@ -312,6 +316,127 @@ class DownloadSafety(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(ubuntu_shim, 'fetch', return_value=b'fixture'), patch.object(subprocess, 'run', return_value=fake):
             with self.assertRaisesRegex(RuntimeError, 'Unexpected Ubuntu archive signer'):
                 ubuntu_shim.download_verified(directory)
+
+
+class GraphicalLogin(unittest.TestCase):
+    def test_system_files_use_password_login_and_a_real_locker_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graphical.install_system_files(root)
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(root / 'etc/lightdm/lightdm.conf')
+            self.assertEqual(config['Seat:*']['autologin-user'], '')
+            self.assertEqual(config['Seat:*']['allow-guest'], 'false')
+            self.assertEqual(config['Seat:*']['user-session'], 'arch-bspwm')
+            session = (root / 'usr/local/bin/arch-bspwm-session').read_text()
+            self.assertIn('light-locker --lock-on-suspend --no-late-locking', session)
+            self.assertIn('exec bspwm', session)
+            greeter = configparser.ConfigParser(interpolation=None)
+            greeter.read(root / 'etc/lightdm/lightdm-gtk-greeter.conf')
+            self.assertIn('~layout', greeter['greeter']['indicators'])
+            for key in ('background', 'default-user-image'):
+                asset = root / greeter['greeter'][key].lstrip('/')
+                ET.parse(asset)
+                self.assertEqual(asset.stat().st_mode & 0o777, 0o644)
+            for name in ('usr/local/bin/arch-bspwm-session', 'usr/local/libexec/arch-greeter-layout'):
+                subprocess.run(['sh', '-n', str(root / name)], check=True)
+
+    def test_gui_migration_preserves_desktop_and_upstream_shortcuts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            keys = home / '.config/sxhkd/sxhkdrc'
+            keys.parent.mkdir(parents=True)
+            original = ('super + Return\n    alacritty\n'
+                        'super + shift + {k,l}\n    {alacritty,sh $HOME/bin/screen-lock}\n')
+            keys.write_text(original)
+            bspwm = home / '.config/bspwm/bspwmrc'
+            bspwm.parent.mkdir()
+            bspwm.write_text('personal desktop settings\n')
+            graphical.configure_user(home)
+            self.assertEqual(bspwm.read_text(), 'personal desktop settings\n')
+            self.assertIn('super + shift + {k,l}', keys.read_text())
+            self.assertEqual(keys.read_text().count('bin/screen-lock'), 1)
+            saved = next((home / 'dotfiles-backups').iterdir())
+            self.assertEqual((saved / '.config/sxhkd/sxhkdrc').read_text(), original)
+            before = keys.read_text()
+            graphical.configure_user(home)
+            self.assertEqual(keys.read_text(), before)
+            self.assertEqual(len(list((home / 'dotfiles-backups').iterdir())), 1)
+            for name in ('screen-lock', 'powermenu'):
+                subprocess.run(['sh', '-n', str(home / 'bin' / name)], check=True)
+
+    def test_system_configuration_backup_is_preserved_on_repeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / 'etc/lightdm/lightdm.conf'
+            config.parent.mkdir(parents=True)
+            config.write_text('[Seat:*]\nuser-session=old-session\n')
+            graphical.install_system_files(root)
+            saved = next((root / 'var/backups/arch-dualboot').iterdir())
+            original = saved / 'etc/lightdm/lightdm.conf'
+            self.assertIn('old-session', original.read_text())
+            graphical.install_system_files(root)
+            self.assertEqual(len(list((root / 'var/backups/arch-dualboot').iterdir())), 1)
+            self.assertIn('old-session', original.read_text())
+
+    def test_symlink_refusal_happens_before_replacing_other_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / 'bin').mkdir()
+            locker = home / 'bin/screen-lock'
+            locker.write_text('original locker')
+            (home / 'bin/powermenu').symlink_to(home / 'elsewhere')
+            with self.assertRaises(RuntimeError):
+                graphical.configure_user(home)
+            self.assertEqual(locker.read_text(), 'original locker')
+
+    def test_lock_and_suspend_fail_without_a_managed_locker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            graphical.configure_user(home)
+            stubs = home / 'stubs'
+            stubs.mkdir()
+            scripts = {
+                'pgrep': 'exit "${LOCKER_RUNNING:-1}"',
+                'notify-send': 'exit 0',
+                'light-locker-command': 'printf "lock\\n" >> "$COMMAND_LOG"',
+                'systemctl': 'printf "suspend\\n" >> "$COMMAND_LOG"',
+                'rofi': 'printf "Suspend\\n"',
+            }
+            for name, body in scripts.items():
+                path = stubs / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o755)
+            log = home / 'commands.log'
+            base = {**os.environ, 'HOME': str(home), 'PATH': f'{stubs}:{os.environ["PATH"]}',
+                    'COMMAND_LOG': str(log)}
+            base.pop('XDG_SESSION_PATH', None)
+            for managed, running in ((False, True), (True, False), (True, True)):
+                with self.subTest(managed=managed, running=running):
+                    env = {**base, 'LOCKER_RUNNING': '0' if running else '1'}
+                    if managed:
+                        env['XDG_SESSION_PATH'] = '/org/freedesktop/DisplayManager/Session0'
+                    log.unlink(missing_ok=True)
+                    result = subprocess.run(['bash', str(home / 'bin/powermenu')],
+                                            env=env, capture_output=True)
+                    if managed and running:
+                        self.assertEqual(result.returncode, 0)
+                        self.assertEqual(log.read_text(), 'lock\nsuspend\n')
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertFalse(log.exists())
+
+    def test_enabling_graphical_boot_does_not_restart_the_current_session(self):
+        with patch.object(graphical, 'root_required'), patch.object(graphical, 'load_state'), \
+             patch.object(Path, 'is_dir', return_value=False), \
+             patch.object(Path, 'is_file', return_value=True), \
+             patch.object(Path, 'is_symlink', return_value=False), \
+             patch.object(graphical, 'install_system_files'), patch.object(graphical, 'run') as command:
+            graphical.configure_system()
+        calls = [call.args[0] for call in command.call_args_list]
+        self.assertIn(['systemctl', 'enable', 'lightdm.service'], calls)
+        self.assertIn(['systemctl', 'set-default', 'graphical.target'], calls)
+        self.assertFalse(any(value in args for args in calls for value in ('--now', 'start', 'restart')))
 
 
 class DesktopFiles(unittest.TestCase):

@@ -29,7 +29,7 @@ xorg-xrdb xorg-setxkbmap xterm bspwm sxhkd alacritty fish polybar rofi dunst pic
 feh thunar gvfs gvfs-mtp tumbler ffmpegthumbnailer thunar-archive-plugin xarchiver
 unzip 7zip pipewire pipewire-audio pipewire-alsa pipewire-pulse wireplumber
 pavucontrol pamixer alsa-utils network-manager-applet polkit-gnome firefox
-flameshot i3lock clipmenu xclip xdotool libnotify ttf-jetbrains-mono-nerd
+flameshot clipmenu xclip xdotool libnotify ttf-jetbrains-mono-nerd
 ttf-nerd-fonts-symbols noto-fonts noto-fonts-emoji papirus-icon-theme
 lxappearance bat lsd micro calcurse gpick mpv zathura
 zathura-pdf-mupdf nvidia-settings'''.split()
@@ -489,13 +489,14 @@ def load_state():
 
 
 def desktop():
+    from graphical_login import PACKAGES, setup
     if sys.platform != 'linux' or os.geteuid() == 0:
         raise RuntimeError('Оформление запускается из обычного пользователя, БЕЗ sudo.')
     # State is root-only; current user chooses only their own home directory.
     if not Path('/etc/arch-release').is_file() or Path('/run/archiso').is_dir():
         raise RuntimeError('Этот этап выполняется в установленном Arch.')
     run(['sudo', 'pacman', '-Syu'])
-    run(['sudo', 'pacman', '-S', '--needed', *DESKTOP_PACKAGES])
+    run(['sudo', 'pacman', '-S', '--needed', *DESKTOP_PACKAGES, *PACKAGES])
     repo = Path.home() / 'bspwm-dotfiles'
     if not repo.exists():
         run(['git', 'clone', 'https://github.com/Zproger/bspwm-dotfiles.git', repo])
@@ -507,8 +508,14 @@ def desktop():
     run(['git', '-C', repo, 'checkout', '--detach', DOTFILES_COMMIT])
     run(['python3', HERE / 'adapt_bspwm.py', repo])
     run(['systemctl', '--user', 'enable', '--now', 'pipewire.socket', 'pipewire-pulse.socket', 'wireplumber.service'])
+    setup(install_packages=False)
     run(['nvidia-smi'], check=False)
-    print('\nОкружение готово. Из локальной консоли выполните startx. Хоткеи — в README.')
+    print('\nОкружение готово. После перезагрузки войдите через LightDM. Хоткеи — в README.')
+
+
+def gui():
+    from graphical_login import setup
+    setup()
 
 
 def mok_enrolled(cert='/etc/secureboot/MOK.cer'):
@@ -640,11 +647,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     actions = {'inspect': inspect, 'install': install, 'desktop': desktop,
                'verify': verify, 'enroll': enroll, 'refresh-shim': refresh_shim, 'repair': repair,
-               'prepare-zfs': prepare_zfs, 'virtualization': virtualization, 'storage': storage}
+               'prepare-zfs': prepare_zfs, 'virtualization': virtualization, 'storage': storage, 'gui': gui}
     parser.add_argument('action', nargs='?', choices=list(actions))
     action = parser.parse_args().action
     if action is None:
-        print('1 inspect — просмотр\n2 install — установка ZFS, СТИРАЕТ ADATA\n3 desktop — оформление (без sudo)\n4 verify — проверка Secure Boot + ZFS\n5 enroll — повторить запрос MOK\n6 refresh-shim — обновить shim\n7 repair — recovery shell с Live USB\n8 prepare-zfs — подготовить ZFS в Live USB, без разметки\n9 virtualization — KVM/libvirt и хранилище ВМ на ZFS\n10 storage — квоты, datasets и zvols для ВМ')
+        print('1 inspect — просмотр\n2 install — установка ZFS, СТИРАЕТ ADATA\n3 desktop — оформление (без sudo)\n4 verify — проверка Secure Boot + ZFS\n5 enroll — повторить запрос MOK\n6 refresh-shim — обновить shim\n7 repair — recovery shell с Live USB\n8 prepare-zfs — подготовить ZFS в Live USB, без разметки\n9 virtualization — KVM/libvirt и хранилище ВМ на ZFS\n10 storage — квоты, datasets и zvols для ВМ\n11 gui — графический вход и блокировка (без sudo)')
         selected = input('Номер этапа: ').strip()
         action = dict(zip(map(str, range(1, len(actions) + 1)), actions)).get(selected)
         if action is None:

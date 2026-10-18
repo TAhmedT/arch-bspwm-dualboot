@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440">
+  <defs>
+    <linearGradient id="base" x2="1" y2="1"><stop stop-color="#0b1020"/><stop offset="1" stop-color="#171324"/></linearGradient>
+    <radialGradient id="blue"><stop stop-color="#244f80" stop-opacity=".55"/><stop offset="1" stop-color="#244f80" stop-opacity="0"/></radialGradient>
+    <radialGradient id="violet"><stop stop-color="#614884" stop-opacity=".35"/><stop offset="1" stop-color="#614884" stop-opacity="0"/></radialGradient>
+    <linearGradient id="ridge" x2="1"><stop stop-color="#89b4fa" stop-opacity="0"/><stop offset=".45" stop-color="#89b4fa" stop-opacity=".5"/><stop offset="1" stop-color="#cba6f7" stop-opacity="0"/></linearGradient>
+  </defs>
+  <path fill="url(#base)" d="M0 0h2560v1440H0z"/>
+  <ellipse cx="140" cy="460" rx="1100" ry="1000" fill="url(#blue)"/>
+  <ellipse cx="2400" cy="1100" rx="1100" ry="950" fill="url(#violet)"/>
+  <path d="M0 1230 330 1090 570 1160 860 960 1110 1180 1390 1060 1680 1170 2020 920 2300 1120 2560 1010v430H0z" fill="#0a0d18" fill-opacity=".65"/>
+  <path d="m0 1230 330-140 240 70 290-200 250 220 280-120 290 110 340-250 280 200 260-110" fill="none" stroke="url(#ridge)" stroke-width="2"/>
+  <g transform="translate(118 116)" fill="none" stroke="#a6c7ee" stroke-width="3" opacity=".65">
+    <path d="m0 64 28-64 28 64-21-11-7-20-7 20z"/>
+    <path d="M0 86h56" stroke-width="1" opacity=".5"/>
+  </g>
+</svg>
