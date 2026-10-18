@@ -657,7 +657,7 @@ def main():
     parser.add_argument('action', nargs='?', choices=list(actions))
     action = parser.parse_args().action
     if action is None:
-        print('1 inspect — просмотр\n2 install — установка ZFS, СТИРАЕТ ADATA\n3 desktop — оформление (без sudo)\n4 verify — проверка Secure Boot + ZFS\n5 enroll — повторить запрос MOK\n6 refresh-shim — обновить shim\n7 repair — recovery shell с Live USB\n8 prepare-zfs — подготовить ZFS в Live USB, без разметки\n9 virtualization — KVM/libvirt и хранилище ВМ на ZFS\n10 storage — квоты, datasets и zvols для ВМ\n11 gui — графический вход и блокировка (без sudo)\n12 hotkeys — бинды на Alt и раскладка на правый Alt (без sudo)')
+        print('1 inspect — просмотр\n2 install — установка ZFS, СТИРАЕТ ADATA\n3 desktop — оформление (без sudo)\n4 verify — проверка Secure Boot + ZFS\n5 enroll — повторить запрос MOK\n6 refresh-shim — обновить shim\n7 repair — recovery shell с Live USB\n8 prepare-zfs — подготовить ZFS в Live USB, без разметки\n9 virtualization — KVM/libvirt и хранилище ВМ на ZFS\n10 storage — квоты, datasets и zvols для ВМ\n11 gui — графический вход и блокировка (без sudo)\n12 hotkeys — бинды на правый Alt, раскладка на левый Alt+левый Shift (без sudo)')
         selected = input('Номер этапа: ').strip()
         action = dict(zip(map(str, range(1, len(actions) + 1)), actions)).get(selected)
         if action is None:

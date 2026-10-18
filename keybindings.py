@@ -1,4 +1,4 @@
-"""Migrate BSPWM shortcuts to Alt without replacing other desktop settings."""
+"""Use Right Alt for BSPWM and Left Alt+Left Shift for US/RU."""
 from datetime import datetime
 from pathlib import Path
 import os
@@ -9,13 +9,18 @@ import sys
 
 from arch_setup import HERE, run, write
 
-LAYOUT_OPTION = 'grp:toggle'
-LAYOUT_COMMAND = "setxkbmap -layout us,ru -option '' -option " + LAYOUT_OPTION
+# Keep Right Alt on Mod5 (AltGr), separate from Left Alt's Mod1. Both sxhkd
+# and bspwm accept Mod5, so no firmware remapping or extra package is needed.
+SHORTCUT_MODIFIER = 'mod5'
+LAYOUT_OPTION = 'grp:lalt_lshift_toggle'
+LAYOUT_ARGS = ['setxkbmap', '-layout', 'us,ru', '-option', '',
+               '-option', LAYOUT_OPTION, '-option', 'lv3:ralt_switch']
+LAYOUT_COMMAND = shlex.join(LAYOUT_ARGS)
 
 
 def alt_hotkeys(text):
     # The upstream commands toggle layouts on modifier key presses; remove them
-    # now that XKB handles Right Alt, otherwise Alt+Shift shortcuts still switch.
+    # now that XKB handles the language combination without a helper script.
     text = re.sub(r'(?m)^(?:Alt_L[ \t]*\+[ \t]*shift|Shift_L[ \t]*\+[ \t]*alt)[ \t]*\n'
                   r'(?:[ \t]+[^\n]*(?:\n|$))+', '', text)
     result = []
@@ -34,6 +39,7 @@ def alt_hotkeys(text):
                 # A hotkey has one keysym: Escape cannot also be a modifier.
                 line = re.sub(r'^alt[ \t]*\+[ \t]*Escape[ \t]*\+[ \t]*r(?=[ \t]*$)',
                               'alt + Escape', line.rstrip('\n')) + ('\n' if line.endswith('\n') else '')
+            line = re.sub(r'\b(alt|mod1)\b', SHORTCUT_MODIFIER, line)
         elif line[:1].isspace() and not line.lstrip().startswith('#'):
             # Upstream launchers replace US/RU with US alone. Keeping the XKB
             # toggle option cannot help once only one layout remains loaded.
@@ -55,9 +61,9 @@ def alt_hotkeys(text):
 def alt_bspwm(text):
     text = re.sub(r'(?ms)^# BEGIN arch-dualboot keyboard\n.*?^# END arch-dualboot keyboard\n', '', text)
     text, count = re.subn(r'(?m)^([ \t]*bspc[ \t]+config[ \t]+pointer_modifier[ \t]+)\S+',
-                         r'\g<1>mod1', text)
+                         r'\g<1>' + SHORTCUT_MODIFIER, text)
     if not count:
-        text = text.rstrip() + '\nbspc config pointer_modifier mod1\n'
+        text = text.rstrip() + '\nbspc config pointer_modifier ' + SHORTCUT_MODIFIER + '\n'
     block = '# BEGIN arch-dualboot keyboard\n' + LAYOUT_COMMAND + '\n# END arch-dualboot keyboard\n'
     if text.startswith('#!') and '\n' in text:
         first, rest = text.split('\n', 1)
@@ -78,7 +84,8 @@ def configure_user(home, *, backup=True):
             raise RuntimeError(f'Нужен обычный файл настроек: {path}')
     updates = {keys: alt_hotkeys(keys.read_text()), bspwm: alt_bspwm(bspwm.read_text())}
     if xinit in paths:
-        updates[xinit] = re.sub(r'(?m)^setxkbmap[^\n]*grp:alt_shift_toggle[^\n]*$',
+        updates[xinit] = re.sub(r'(?m)^setxkbmap[ \t]+-layout[ \t]+us,ru[ \t]+'
+                               r'[^\n]*\bgrp:(?:alt_shift_toggle|toggle|lalt_lshift_toggle)\b[^\n]*$',
                                LAYOUT_COMMAND, xinit.read_text())
     changed = {path: content for path, content in updates.items() if path.read_text() != content}
     if backup and changed:
@@ -101,7 +108,7 @@ def setup():
         # restarting LightDM/the active desktop.
         run(['sudo', 'python3', HERE / 'graphical_login.py', '--keyboard'])
     if os.environ.get('DISPLAY'):
-        run(['setxkbmap', '-layout', 'us,ru', '-option', '', '-option', LAYOUT_OPTION])
-        run(['bspc', 'config', 'pointer_modifier', 'mod1'])
+        run(LAYOUT_ARGS)
+        run(['bspc', 'config', 'pointer_modifier', SHORTCUT_MODIFIER])
         run(['pkill', '-USR1', '-u', str(os.geteuid()), '-x', 'sxhkd'], check=False)
-    print('Бинды: Alt. Раскладка US/RU: правый Alt. В TTY изменения применятся при следующем входе в BSPWM.')
+    print('Бинды: правый Alt. Раскладка US/RU: левый Alt+левый Shift. В TTY изменения применятся при следующем входе в BSPWM.')

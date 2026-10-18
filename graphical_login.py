@@ -8,7 +8,7 @@ import shutil
 import sys
 
 from arch_setup import HERE, load_state, root_required, run, write
-from keybindings import LAYOUT_COMMAND, alt_hotkeys, configure_user as configure_hotkeys
+from keybindings import LAYOUT_COMMAND, SHORTCUT_MODIFIER, alt_hotkeys, configure_user as configure_hotkeys
 
 PACKAGES = ['lightdm', 'lightdm-gtk-greeter', 'light-locker', 'adw-gtk-theme',
             'accountsservice', 'librsvg']
@@ -105,9 +105,10 @@ def configure_user(home, *, backup=True):
     text = alt_hotkeys(text)
     # Preserve the upstream brace-expanded binding and all other shortcuts.
     text = text.replace('sh $HOME/bin/screen-lock', '"$HOME/bin/screen-lock"')
-    text = re.sub(r'(?m)^alt\s*\+\s*shift\s*\+\s*l[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+', '', text)
+    text = re.sub(r'(?m)^' + re.escape(SHORTCUT_MODIFIER)
+                  + r'\s*\+\s*shift\s*\+\s*l[ \t]*\n(?:[ \t]+[^\n]*(?:\n|$))+', '', text)
     if 'bin/screen-lock' not in text:
-        text = text.rstrip() + '\n\nalt + shift + l\n    "$HOME/bin/screen-lock"\n'
+        text = text.rstrip() + '\n\n' + SHORTCUT_MODIFIER + ' + shift + l\n    "$HOME/bin/screen-lock"\n'
     updates = {home / 'bin/screen-lock': (SCREEN_LOCK, 0o755),
                home / 'bin/powermenu': (POWER_MENU, 0o755), keys: (text, 0o644)}
     _install_files(updates, home / 'dotfiles-backups', home, backup=backup)
@@ -198,7 +199,7 @@ def setup(*, install_packages=True):
     configure_user(Path.home())
     configure_hotkeys(Path.home())
     print('Графический вход готов. При следующей загрузке выберите сеанс Arch BSPWM.')
-    print('Alt+Shift+L откроет экран входа с паролем после входа через LightDM. Раскладка: правый Alt.')
+    print('Правый Alt+Shift+L откроет экран входа с паролем после входа через LightDM. Раскладка: левый Alt+левый Shift.')
     print('Сохраните работу и перезагрузитесь, когда будет удобно.')
 
 
