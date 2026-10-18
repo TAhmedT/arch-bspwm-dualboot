@@ -31,7 +31,7 @@ unzip 7zip pipewire pipewire-audio pipewire-alsa pipewire-pulse wireplumber
 pavucontrol pamixer alsa-utils network-manager-applet polkit-gnome firefox
 flameshot i3lock clipmenu xclip xdotool libnotify ttf-jetbrains-mono-nerd
 ttf-nerd-fonts-symbols noto-fonts noto-fonts-emoji papirus-icon-theme
-gtk-engine-murrine lxappearance bat lsd micro calcurse gpick mpv zathura
+lxappearance bat lsd micro calcurse gpick mpv zathura
 zathura-pdf-mupdf nvidia-settings'''.split()
 
 
