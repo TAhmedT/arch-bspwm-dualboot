@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 import re
+import shlex
 import shutil
 import sys
 
@@ -33,6 +34,20 @@ def alt_hotkeys(text):
                 # A hotkey has one keysym: Escape cannot also be a modifier.
                 line = re.sub(r'^alt[ \t]*\+[ \t]*Escape[ \t]*\+[ \t]*r(?=[ \t]*$)',
                               'alt + Escape', line.rstrip('\n')) + ('\n' if line.endswith('\n') else '')
+        elif line[:1].isspace() and not line.lstrip().startswith('#'):
+            # Upstream launchers replace US/RU with US alone. Keeping the XKB
+            # toggle option cannot help once only one layout remains loaded.
+            def remove_reset(match):
+                try:
+                    # A comma inside a quoted argument is not an expansion
+                    # boundary. An unfinished quote must keep its contents.
+                    shlex.split(line[:match.start()])
+                except ValueError:
+                    return match[0]
+                return match[1]
+            line = re.sub(r'(^[ \t]*(?:\{[ \t]*)?|,[ \t]*)'
+                          r'setxkbmap[ \t]+-layout[ \t]+us[ \t]*;[ \t]*',
+                          remove_reset, line)
         result.append(line)
     return ''.join(result)
 

@@ -442,6 +442,49 @@ class GraphicalLogin(unittest.TestCase):
 
 
 class AltBindings(unittest.TestCase):
+    def test_launchers_do_not_replace_bilingual_keyboard_with_us_only(self):
+        text = '''super + {d,x}
+    {setxkbmap -layout us;rofi -m -1 -show drun,setxkbmap -layout us; sh $HOME/bin/powermenu}
+super + shift + {c,e,s}
+    {setxkbmap -layout us; sh $HOME/bin/calculator, \\
+    setxkbmap -layout us; rofi -modi emoji -m -1 -show emoji, \\
+    setxkbmap -layout us; alacritty -e sh $HOME/bin/timer}
+'''
+        updated = keybindings.alt_hotkeys(text)
+        self.assertNotIn('setxkbmap', updated)
+        self.assertIn('{rofi -m -1 -show drun,sh $HOME/bin/powermenu}', updated)
+        self.assertIn('sh $HOME/bin/calculator,', updated)
+        self.assertIn('rofi -modi emoji -m -1 -show emoji,', updated)
+        self.assertIn('alacritty -e sh $HOME/bin/timer}', updated)
+        self.assertEqual(keybindings.alt_hotkeys(updated), updated)
+
+        # Execute the migrated menu action with harmless fake commands. The
+        # launcher must still run, without invoking the layout-reset command.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ('setxkbmap', 'rofi'):
+                executable = root / name
+                executable.write_text('#!/bin/sh\nprintf "%s\\n" "' + name + ' $*" >> "$LOG"\n')
+                executable.chmod(0o755)
+            action = updated.splitlines()[1].strip()[1:-1].split(',')[0]
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                       LOG=str(root / 'commands.log'))
+            subprocess.run(['sh', '-c', action], env=env, check=True)
+            self.assertEqual((root / 'commands.log').read_text(), 'rofi -m -1 -show drun\n')
+
+    def test_layout_migration_preserves_comments_strings_and_custom_layouts(self):
+        text = '''# setxkbmap -layout us;rofi
+alt + u
+    printf '%s' 'setxkbmap -layout us;'
+alt + i
+    printf '%s' 'text,setxkbmap -layout us;rofi'
+alt + shift + u
+    setxkbmap -layout us,de -option grp:toggle
+alt + ctrl + u
+    setxkbmap -layout us -variant dvorak
+'''
+        self.assertEqual(keybindings.alt_hotkeys(text), text)
+
     def test_commands_are_preserved_and_expanded_shortcuts_do_not_collide(self):
         text = '''# super is a modifier, not a command substitution
 super + Escape + r
@@ -505,7 +548,7 @@ super + {grave,Tab}
             bspwm = home / '.config/bspwm/bspwmrc'
             keys.parent.mkdir(parents=True)
             bspwm.parent.mkdir(parents=True)
-            keys.write_text('super + Return\n    alacritty\n')
+            keys.write_text('super + Return\n    alacritty\nsuper + d\n    setxkbmap -layout us;rofi -show drun\n')
             bspwm.write_text('#!/bin/sh\nbspc config pointer_modifier mod4\n# personal settings\n')
             bspwm.chmod(0o755)
             (home / '.xinitrc').write_text('setxkbmap -layout us,ru -option grp:alt_shift_toggle\nexec bspwm\n')
@@ -513,6 +556,8 @@ super + {grave,Tab}
             keybindings.configure_user(home)
             saved = next((home / 'dotfiles-backups').iterdir())
             self.assertIn('super + Return', (saved / '.config/sxhkd/sxhkdrc').read_text())
+            self.assertIn('setxkbmap -layout us;', (saved / '.config/sxhkd/sxhkdrc').read_text())
+            self.assertNotIn('setxkbmap', keys.read_text())
             self.assertIn('pointer_modifier mod1', bspwm.read_text())
             self.assertIn('# personal settings', bspwm.read_text())
             self.assertEqual(bspwm.stat().st_mode & 0o777, 0o755)
