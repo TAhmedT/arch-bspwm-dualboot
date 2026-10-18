@@ -2,16 +2,25 @@
 
 18 октября 2026:
 
-- 16 offline-тестов `python3 -B -m unittest -v test_arch_setup` — PASS на Linux/WSL.
-- `bash -n install.sh` и синтаксис генерируемых shell-файлов — PASS.
+- 24 offline-теста `python3 -B -m unittest -v test_arch_setup` — PASS на Linux/WSL.
+  Добавлены отказы до разметки при неготовом ZFS, защита существующего pool,
+  структура квот/datasets, ZFS fstab/hostid/hooks, проверка отпечатка ArchZFS,
+  валидация имён/размеров и отмена создания zvol без изменения хранилища.
+- `bash -n install.sh`, `bash -n prepare-zfs.sh` и синтаксис генерируемых shell-файлов — PASS.
 - Синтаксический разбор `windows.ps1` PowerShell Parser — PASS; действия скрипта
   над текущей Windows для тестирования не выполнялись.
 - Проверен настоящий `shim-signed_1.59+15.8-0ubuntu2_amd64.deb`: GPG InRelease,
   ожидаемый отпечаток ключа, SHA256 индексов/пакета и извлечение shim/MokManager.
   Для этой проверки HTTPS-загрузка выполнялась через Windows, GPG — в WSL,
   поскольку прямая сеть WSL была недоступна. Код парсинга/проверок тот же.
+- Сверены текущий официальный ArchZFS release, ключ и пакеты; изучен настоящий
+  пакет `zfs-utils-2.4.4-3`: наличие compatibility-профиля, initcpio hook/install,
+  monthly scrub timer. `linux-lts` в официальном Arch: 6.18.57.
 
 **Не проверено:** фактическая разметка физических SSD, полный pacstrap,
 загрузка данной ASUS UEFI с её актуальной db/dbx, регистрация MOK на этой плате,
 запуск Xorg/NVIDIA и VALORANT. Такие проверки выполняются при реальной установке.
+Также не выполнялись реальная сборка DKMS в Arch ISO, создание/импорт pool,
+загрузка ZFS root, запуск KVM/libvirt и гостевых ОС. Тесты командного плана
+не заменяют эти проверки; текущие физические диски не изменялись.
 Репозиторий не утверждает, что установка уже протестирована целиком на железе.

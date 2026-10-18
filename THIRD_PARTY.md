@@ -10,5 +10,9 @@
 - [Ubuntu shim-signed](https://packages.ubuntu.com/resolute/shim-signed),
   лицензии и происхождение внутри официального пакета.
 - [shim](https://github.com/rhboot/shim), BSD-2-Clause и лицензии зависимостей.
+- [OpenZFS](https://github.com/openzfs/zfs), CDDL; пакеты поставляет
+  [ArchZFS](https://github.com/archzfs/archzfs/releases/tag/experimental).
+- [QEMU](https://www.qemu.org/), GPL-2.0 и лицензии компонентов;
+  [libvirt](https://libvirt.org/), LGPL-2.1; [virt-manager](https://virt-manager.org/), GPL.
 
 Скрипты не запускают оригинальный Builder Zproger или Debian maintainer scripts.

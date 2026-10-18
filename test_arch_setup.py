@@ -13,6 +13,8 @@ from unittest.mock import patch
 import arch_setup as app
 import adapt_bspwm
 import ubuntu_shim
+import zfs_support
+import storage
 
 
 def adata():
@@ -97,7 +99,26 @@ class DiskSafety(unittest.TestCase):
             self.assertFalse(app.username_ok(value))
         self.assertTrue(app.username_ok('ahmed'))
         with self.assertRaises(ValueError):
-            app.template_refind('bad', '};reboot')
+            app.template_refind('};reboot')
+
+    def test_zfs_preflight_failure_prevents_any_partition_commands(self):
+        with patch.object(app, 'root_required'), patch.object(Path, 'is_dir', return_value=True), \
+             patch.object(app, 'secureboot_enabled', return_value=False), \
+             patch.object(zfs_support, 'check_live', side_effect=RuntimeError('no module')), patch.object(app, 'run') as command:
+            with self.assertRaisesRegex(RuntimeError, 'no module'):
+                app.install()
+            command.assert_not_called()
+
+    def test_existing_zfs_stops_even_without_arch_labels(self):
+        disk = adata()
+        disk['children'][0]['fstype'] = 'zfs_member'
+        with self.assertRaises(RuntimeError):
+            app.validate_target(disk)
+        for label in ('ARCH_EFI', 'ARCH_ZFS'):
+            disk = adata()
+            disk['children'][0]['partlabel'] = label
+            with self.assertRaises(RuntimeError):
+                app.validate_target(disk)
 
 
 class BootFiles(unittest.TestCase):
@@ -120,12 +141,75 @@ class BootFiles(unittest.TestCase):
             self.assertLess(updater.index('sbverify --cert'), updater.index('mv -f'))
             self.assertIn('--cmdline=@/etc/kernel/cmdline', updater)
             self.assertIn('arch-linux-previous.efi', updater)
+            self.assertLess(updater.index('modinfo -k "$kver" zfs'), updater.index('ukify build'))
+            self.assertIn('etc/hostid', updater)
+            self.assertIn('root=ZFS=archpool/ROOT/arch', (root / 'etc/kernel/cmdline').read_text())
             prehook = (root / 'etc/pacman.d/hooks/05-arch-esp-check.hook').read_text()
             self.assertIn('AbortOnFail', prehook)
             conf = (root / 'boot/EFI/refind/refind.conf').read_text()
             self.assertIn('loader /EFI/Linux/arch-linux.efi', conf)
             self.assertNotIn('cryptdevice', conf)
             self.assertNotIn('/vmlinuz-linux', conf)
+
+
+class ZfsStorage(unittest.TestCase):
+    def test_dataset_layout_keeps_vm_and_iso_outside_root_home_quotas(self):
+        with patch.object(zfs_support, 'run') as command:
+            zfs_support.create_pool('/dev/nvme9n1p2', Path('/mnt/test'))
+        calls = [item.args[0] for item in command.call_args_list]
+        create = calls[0]
+        self.assertEqual(create[-2:], ['archpool', '/dev/nvme9n1p2'])
+        self.assertNotIn('-f', create)
+        self.assertIn('compatibility=openzfs-2.2-linux', create)
+        for name, quota in ((zfs_support.ROOT, '96G'), (zfs_support.HOME, '160G'),
+                            (zfs_support.VM, '512G'), (zfs_support.ISO, '64G')):
+            entry = next(args for args in calls if args[:2] == ['zfs', 'create'] and args[-1] == name)
+            self.assertIn('quota=' + quota, entry)
+        self.assertTrue(any('refreservation=96G' in args for args in calls))
+        self.assertTrue(any(args[-1] == Path('/mnt/test/var/lib/libvirt/images') for args in calls))
+
+    def test_fstab_uses_legacy_datasets_not_zfs_uuid(self):
+        fstab = zfs_support.fstab('1234-ABCD')
+        self.assertIn('archpool/ROOT/arch / zfs defaults 0 0', fstab)
+        self.assertIn('archpool/vm /var/lib/libvirt/images zfs', fstab)
+        self.assertIn('archpool/iso /srv/iso zfs', fstab)
+        self.assertIn('umask=0077', fstab)
+        with self.assertRaises(ValueError):
+            zfs_support.fstab('evil\nentry')
+
+    def test_busybox_zfs_hooks_include_hostid_and_exclude_systemd(self):
+        text = zfs_support.kernel_hooks('HOOKS=(base systemd autodetect block filesystems fsck)\n')
+        hooks = text.split('HOOKS=(', 1)[1].split(')', 1)[0].split()
+        self.assertNotIn('systemd', hooks)
+        self.assertLess(hooks.index('zfs'), hooks.index('filesystems'))
+        self.assertIn('udev', hooks)
+        self.assertIn('FILES+=(/etc/hostid)', text)
+        with self.assertRaises(RuntimeError):
+            zfs_support.kernel_hooks('# unknown format')
+
+    def test_unexpected_release_key_never_gets_local_trust(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(zfs_support, 'run', return_value='fpr:::::::::BAD:') as command:
+                with self.assertRaises(RuntimeError):
+                    zfs_support.trust(Path(directory))
+            self.assertFalse(any('--lsign-key' in c.args[0] for c in command.call_args_list))
+
+    def test_storage_names_and_sizes_cannot_escape_vm_pool(self):
+        for value in ('../root', 'foo/bar', 'x;reboot', 'UPPER', ''):
+            with self.assertRaises(ValueError):
+                storage.child_name(value)
+        self.assertEqual(storage.child_name('lab01'), 'lab01')
+        for value in ('0', '-1', '99999', '1G', '5;reboot'):
+            with self.assertRaises(ValueError):
+                storage.gib(value)
+        self.assertEqual(storage.gib('40'), 40)
+
+    def test_cancelled_zvol_creation_never_creates_a_disk(self):
+        with patch('builtins.input', side_effect=['lab01', '40', 'no']), \
+             patch.object(storage, 'run', return_value='archpool/vm') as command:
+            with self.assertRaises(RuntimeError):
+                storage.create_vm_storage(block=True)
+        self.assertFalse(any('create' in c.args[0] for c in command.call_args_list))
 
 
 class DownloadSafety(unittest.TestCase):

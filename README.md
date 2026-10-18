@@ -1,4 +1,4 @@
-# Arch + Windows: BSPWM, rEFInd и Secure Boot
+# Arch на ZFS + Windows: BSPWM, rEFInd и Secure Boot
 
 Пошаговая установка для **Ryzen 5 3600 / RTX 3060 Ti / 32 ГБ RAM**.
 Arch занимает отдельный **ADATA LEGEND 900 (~1 ТБ, прежний E:)**.
@@ -10,7 +10,8 @@ Windows остаётся на Samsung SSD 980 1TB; Samsung 860 EVO с D: не ф
 
 Что получится:
 
-- Arch с ext4, без шифрования/LVM и без запроса пароля диска.
+- Arch на ZFS: отдельные datasets для системы, `/home`, ВМ и ISO, с квотами.
+- Без шифрования/LVM и без запроса пароля диска. Ядро `linux-lts`.
 - Отдельный EFI-раздел 2 ГиБ на ADATA, смонтированный в `/boot`.
 - Графическое меню rEFInd с темой [Catppuccin Mocha](https://github.com/catppuccin/refind).
 - Secure Boot отключается **временно**, затем остаётся включённым для обеих ОС.
@@ -25,14 +26,42 @@ Windows остаётся на Samsung SSD 980 1TB; Samsung 860 EVO с D: не ф
 |---|---|
 | `windows.ps1` | Статус Secure Boot/TPM/BitLocker, UTC, отключение Fast Startup; отдельные флаги для приостановки и возобновления BitLocker |
 | `bash install.sh inspect` | Только просмотр дисков и UEFI |
+| `bash install.sh prepare-zfs` | Модуль ZFS для ядра Live USB; только RAM-среда, без разметки SSD |
 | `bash install.sh install` | Проверка дисков, подтверждение, разметка ADATA, Arch, NVIDIA, rEFInd, UKI, подписи и запрос MOK |
 | `bash install.sh desktop` | Пакеты рабочего стола и адаптация dotfiles с резервной копией |
 | `sudo bash install.sh verify` | Проверка включённого Secure Boot, MOK, подписей и EFI-раздела |
 | `sudo bash install.sh enroll` | Повторный запрос регистрации вашего MOK |
 | `sudo bash install.sh refresh-shim` | Проверенное обновление shim/MokManager |
 | `bash install.sh repair` | Recovery shell с Live USB, без форматирования |
+| `sudo bash install.sh virtualization` | KVM/QEMU, libvirt, virt-manager; ВМ не создаются |
+| `sudo bash install.sh storage` | Меню квот, отдельных datasets и блочных zvols для ВМ |
 
 Без аргументов `bash install.sh` открывает меню этих этапов.
+
+## Как распределён ADATA
+
+На SSD два физических GPT-раздела: EFI 2 ГиБ и ZFS pool на остальном месте.
+Внутри pool место разделено логически; увеличивать квоты можно без переразметки.
+
+| Dataset | Путь | Максимум |
+|---|---|---:|
+| `archpool/ROOT/arch` | `/` — система и пакеты | 96 ГиБ |
+| `archpool/home` | `/home` | 160 ГиБ |
+| `archpool/vm` | `/var/lib/libvirt/images` — диски ВМ | 512 ГиБ суммарно |
+| `archpool/iso` | `/srv/iso` — установочные образы | 64 ГиБ |
+| `archpool/reserve` | Не монтируется | Резерв 96 ГиБ |
+
+Квота — верхний предел, а не заранее занятый раздел. Снимки и дочерние datasets
+тоже учитываются в квоте. Резерв 96 ГиБ не отдаётся обычным записям: это запас
+для обслуживания pool, а не дополнительное хранилище. Указывать всем областям
+максимумы больше ёмкости SSD можно, но это не создаёт физическое место.
+
+Используются LZ4, autotrim, ежемесячный scrub, ограничение ARC до 8 ГиБ и
+профиль совместимости `openzfs-2.2-linux`. Dedup и шифрование не включаются.
+**Один SSD не даёт избыточности:** контрольные суммы могут обнаружить порчу,
+но резервную копию на другом носителе снимки не заменяют.
+
+Подробнее о ВМ, zvols и изменении размеров — [VIRTUALIZATION.md](VIRTUALIZATION.md).
 
 **Руками:** записать флешку, сохранить ключ BitLocker, изменить переключатель
 Secure Boot в UEFI, подтвердить стирание ADATA, задать пароли и подтвердить MOK
@@ -106,7 +135,16 @@ cd arch-bspwm-dualboot && bash install.sh
 
 Выберите **1 — inspect**. Убедитесь, что видны ADATA LEGEND 900, Samsung 980
 с Windows и Samsung 860 EVO. Linux-номера дисков могут отличаться от Windows.
-После просмотра снова выполните `bash install.sh` и выберите **2 — install**.
+После просмотра выполните `bash install.sh prepare-zfs` (или пункт **8**).
+Подготовка автоматически скачает подписанные пакеты ArchZFS, найдёт именно
+headers работающего ядра ISO в официальном Arch Archive и соберёт модуль DKMS.
+Она использует RAM overlay (до 12 ГиБ из ваших 32 ГиБ), SSD не размечает.
+Сборка может занять несколько минут. Если пакет, подпись или ядро несовместимы,
+этап остановится до форматирования; отключать проверки нельзя.
+
+После успешной подготовки снова откроется меню: выберите **2 — install**.
+После каждой новой загрузки Live USB подготовка нужна заново. Обновлённый ISO
+может потребоваться, если старые headers/инструменты сборки больше не подходят.
 
 Если Ethernet недоступен, до запуска меню подключитесь через `iwctl`:
 
@@ -124,7 +162,7 @@ exit
 Скрипт спросит имя пользователя (по умолчанию `ahmed`) и часовой пояс
 (по умолчанию `Europe/Moscow`, можно выбрать свой).
 
-**До разметки** он скачает и проверит shim, найдёт EFI Windows на Samsung 980
+**До разметки** он проверит загруженный ZFS module, скачает и проверит shim, найдёт EFI Windows на Samsung 980
 и убедится, что там существует `bootmgfw.efi`. EFI Windows монтируется только
 для чтения. Затем нужно ввести:
 
@@ -132,10 +170,10 @@ exit
 2. Точную фразу `ERASE ADATA LEGEND 900`.
 
 Путь не зашит в скрипт. Другой SSD, диск с активными точками монтирования,
-USB-диск, неоднозначный набор дисков или уже существующие `ARCH_EFI/ARCH_ROOT`
+USB-диск, неоднозначный набор дисков или уже существующие `ARCH_EFI/ARCH_ZFS/ARCH_ROOT`
 блокируют разметку. При ошибке подтверждения форматирование не запускается.
 
-После подтверждения скрипт создаст GPT и два раздела, установит систему и
+После подтверждения скрипт создаст GPT, EFI, ZFS pool и datasets с квотами, установит систему и
 попросит задать **три отдельных пароля**:
 
 - пароль root Arch;
@@ -146,9 +184,12 @@ USB-диск, неоднозначный набор дисков или уже �
 не пароль диска; шифрование Linux не включается. На вводе обычных паролей
 символы не отображаются — это нормально.
 
-Установщик настроит `nvidia-open` для RTX 3060 Ti, микрокод AMD, NetworkManager,
+Установщик настроит `linux-lts`, `zfs-dkms` и `nvidia-open-dkms` для RTX 3060 Ti,
+микрокод AMD, NetworkManager,
 синхронизацию времени, генерацию подписанного UKI и обновление подписей.
 Рабочая копия этого репозитория сохранится в `/opt/arch-bspwm-dualboot`.
+Начальный снимок `@installed` создаётся после настройки. Перед выходом pool
+чисто экспортируется. Автоматического rollback и `zpool upgrade` нет.
 
 **Если скрипт завершился с ошибкой:** сохраните её текст и остановитесь.
 Не запускайте `install` для повторного стирания. Уже установленный диск
@@ -180,7 +221,8 @@ sudo bash install.sh verify
 ```
 
 Должен быть `PASS` для Secure Boot, зарегистрированного MOK, подписей UKI/rEFInd
-и правильного EFI-раздела. Проверка также покажет время и `nvidia-smi`.
+и правильного EFI-раздела, datasets и GUID/состояния ZFS pool.
+Проверка также покажет время и `nvidia-smi`.
 Если MOK не зарегистрирован, повторите запрос:
 
 ```bash
@@ -265,10 +307,17 @@ sudo pacman -Syu
 
 Перед обновлениями загрузочных пакетов проверяется правильный `/boot`.
 После генерации initramfs создаётся и проверяется подписанный UKI;
+перед его заменой должны существовать ZFS/NVIDIA modules нового LTS-ядра,
+а ZFS и hostid должны быть включены в initramfs.
 новый rEFInd также подписывается. Пакеты NVIDIA/системного загрузочного ПО
 дополнительно вызывают пересборку. Старый подписанный UKI сохраняется отдельным
 пунктом меню, но это **не полный бэкап системы**: после удаления старых модулей
 ядра его графика/драйверы могут не работать. Live USB сохраняйте для ремонта.
+**Если DKMS, mkinitcpio или подпись завершились ошибкой, не перезагружайтесь.**
+Сохраните ошибку и исправьте сборку; подписанный старый UKI не означает,
+что все файлы обновлённой системы совместимы с ним. ArchZFS — внешний проект,
+а его текущий официальный канал называется `experimental`: задержки совместимости
+с ядрами возможны. Не используйте старый `archzfs.com` и `SigLevel = Never`.
 
 shim обслуживается отдельно: старый подписанный shim может попасть в dbx/SBAT.
 Периодически проверяйте обновления, особенно перед обновлением UEFI/dbx:
@@ -293,10 +342,14 @@ Windows Boot Manager в UEFI. Для ремонта Arch временно отк
 загрузите сохранённый Arch USB, подключитесь к сети, клонируйте репозиторий и:
 
 ```bash
+bash install.sh prepare-zfs
 bash install.sh repair
 ```
 
-Скрипт найдёт существующие разделы ADATA и откроет root shell в них без разметки.
+Подготовка вернёт меню; выбирайте **repair, не install**.
+Скрипт найдёт существующие разделы ADATA, импортирует только `archpool` с ADATA
+и откроет root shell без разметки. Если pool помечен как используемый другим
+хостом, автоматический `-f` не применяется: нужен разбор причины.
 Если система установлена и ключи/скрипты на месте, можно пересобрать:
 
 ```bash
@@ -325,6 +378,7 @@ bash -n install.sh
 подтверждения, EFI Windows, проверки пакета shim, резервные копии конфигов
 и синтаксис генерируемых shell-скриптов. Фактическую загрузку UEFI, работу
 NVIDIA/монитора и Vanguard на этой плате нужно проверить при установке.
+Загрузка root на ZFS и работа KVM также требуют проверки на железе.
 
 ## Первоисточники
 
@@ -338,3 +392,6 @@ NVIDIA/монитора и Vanguard на этой плате нужно пров
 - [Ubuntu archive signing key](https://documentation.ubuntu.com/security/software-integrity/image-verification/)
 - [Riot Secure Boot](https://support.riotgames.com/en-us/riot/client/secure-boot-guide)
 - [Microsoft BitLocker](https://learn.microsoft.com/en-us/windows/security/operating-system-security/data-protection/bitlocker/bitlocker-overview-and-requirements-faq)
+- [OpenZFS: Arch root on ZFS](https://openzfs.github.io/openzfs-docs/Getting%20Started/Arch%20Linux/Root%20on%20ZFS.html)
+- [Текущий официальный репозиторий ArchZFS](https://github.com/archzfs/archzfs/releases/tag/experimental)
+- [ZFS quotas/reservations](https://openzfs.github.io/openzfs-docs/man/master/7/zfsprops.7.html)
