@@ -356,7 +356,7 @@ class GraphicalLogin(unittest.TestCase):
             bspwm.write_text('personal desktop settings\n')
             graphical.configure_user(home)
             self.assertEqual(bspwm.read_text(), 'personal desktop settings\n')
-            self.assertIn('mod5 + shift + {k,l}', keys.read_text())
+            self.assertIn('mod4 + shift + {k,l}', keys.read_text())
             self.assertEqual(keys.read_text().count('bin/screen-lock'), 1)
             saved = next((home / 'dotfiles-backups').iterdir())
             self.assertEqual((saved / '.config/sxhkd/sxhkdrc').read_text(), original)
@@ -474,13 +474,13 @@ super + shift + {c,e,s}
 
     def test_layout_migration_preserves_comments_strings_and_custom_layouts(self):
         text = '''# setxkbmap -layout us;rofi
-mod5 + u
+mod4 + u
     printf '%s' 'setxkbmap -layout us;'
-mod5 + i
+mod4 + i
     printf '%s' 'text,setxkbmap -layout us;rofi'
-mod5 + shift + u
+mod4 + shift + u
     setxkbmap -layout us,de -option grp:toggle
-mod5 + ctrl + u
+mod4 + ctrl + u
     setxkbmap -layout us -variant dvorak
 '''
         self.assertEqual(keybindings.alt_hotkeys(text), text)
@@ -510,11 +510,11 @@ super + {grave,Tab}
 '''
         updated = keybindings.alt_hotkeys(text)
         self.assertIn('    echo super mod4 alt\n', updated)
-        self.assertIn('mod5 + Escape\n', updated)
-        self.assertIn('mod5 + {grave,ctrl + Tab}\n', updated)
+        self.assertIn('mod4 + Escape\n', updated)
+        self.assertIn('mod4 + {grave,ctrl + Tab}\n', updated)
         self.assertNotIn('change_language.sh', updated)
-        self.assertIn('mod5 + control + {h,j,k,l}', updated)
-        self.assertIn('mod5 + {_,ctrl + shift + }{h,j,k,l}', updated)
+        self.assertIn('mod4 + control + {h,j,k,l}', updated)
+        self.assertIn('mod4 + {_,ctrl + shift + }{h,j,k,l}', updated)
         self.assertEqual(keybindings.alt_hotkeys(updated), updated)
 
         def expand(line):
@@ -558,11 +558,11 @@ super + {grave,Tab}
             self.assertIn('super + Return', (saved / '.config/sxhkd/sxhkdrc').read_text())
             self.assertIn('setxkbmap -layout us;', (saved / '.config/sxhkd/sxhkdrc').read_text())
             self.assertNotIn('setxkbmap', keys.read_text())
-            self.assertIn('pointer_modifier mod5', bspwm.read_text())
+            self.assertIn('pointer_modifier mod4', bspwm.read_text())
             self.assertIn('# personal settings', bspwm.read_text())
             self.assertEqual(bspwm.stat().st_mode & 0o777, 0o755)
             self.assertIn('grp:lalt_lshift_toggle', (home / '.xinitrc').read_text())
-            self.assertIn('lv3:ralt_switch', (home / '.xinitrc').read_text())
+            self.assertNotIn('lv3:ralt_switch', (home / '.xinitrc').read_text())
             self.assertNotIn('grp:alt_shift_toggle', (home / '.xinitrc').read_text())
             self.assertEqual((home / 'personal.txt').read_text(), 'unchanged')
             before = bspwm.read_text()
@@ -587,29 +587,57 @@ super + {grave,Tab}
             xinit = home / '.xinitrc'
             xinit.write_text("setxkbmap -layout us,ru -option '' -option grp:toggle\nexec bspwm\n")
             keybindings.configure_user(home)
-            self.assertIn('mod5 + Return\n    alacritty', keys.read_text())
-            self.assertIn('mod5 + shift + l\n    echo alt mod1', keys.read_text())
-            self.assertIn('mod5 + {_,shift + }Tab', keys.read_text())
+            self.assertIn('mod4 + Return\n    alacritty', keys.read_text())
+            self.assertIn('mod4 + shift + l\n    echo alt mod1', keys.read_text())
+            self.assertIn('mod4 + {_,shift + }Tab', keys.read_text())
             for path in (bspwm, xinit):
                 text = path.read_text()
                 self.assertNotIn('grp:toggle', text)
                 self.assertEqual(text.count('grp:lalt_lshift_toggle'), 1)
-                self.assertEqual(text.count('lv3:ralt_switch'), 1)
+                self.assertNotIn('lv3:ralt_switch', text)
                 subprocess.run(['sh', '-n', path], check=True)
-            self.assertIn('pointer_modifier mod5', bspwm.read_text())
+            self.assertIn('pointer_modifier mod4', bspwm.read_text())
             before = {path: path.read_text() for path in (keys, bspwm, xinit)}
             keybindings.configure_user(home)
             self.assertEqual(before, {path: path.read_text() for path in before})
             self.assertEqual(len(list((home / 'dotfiles-backups').iterdir())), 1)
 
-    def test_gui_adds_lock_binding_on_right_alt_and_keeps_it_on_repeat(self):
+    def test_right_alt_setup_restores_win_and_removes_old_altgr_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            keys = home / '.config/sxhkd/sxhkdrc'
+            keys.parent.mkdir(parents=True)
+            original = 'mod5 + Return\n    alacritty\nmod5 + shift + l\n    echo mod5 alt\n'
+            keys.write_text(original)
+            bspwm = home / '.config/bspwm/bspwmrc'
+            bspwm.parent.mkdir(parents=True)
+            old_layout = ("setxkbmap -layout us,ru -option '' -option grp:lalt_lshift_toggle"
+                          " -option lv3:ralt_switch\n")
+            bspwm.write_text('#!/bin/sh\n# BEGIN arch-dualboot keyboard\n' + old_layout
+                             + '# END arch-dualboot keyboard\nbspc config pointer_modifier mod5\n')
+            xinit = home / '.xinitrc'
+            xinit.write_text(old_layout + 'exec bspwm\n')
+            keybindings.configure_user(home)
+            self.assertEqual(keys.read_text(), original.replace('mod5 +', 'mod4 +'))
+            self.assertIn('pointer_modifier mod4', bspwm.read_text())
+            for path in (bspwm, xinit):
+                self.assertIn('grp:lalt_lshift_toggle', path.read_text())
+                self.assertNotIn('lv3:ralt_switch', path.read_text())
+            saved = next((home / 'dotfiles-backups').iterdir())
+            self.assertEqual((saved / '.config/sxhkd/sxhkdrc').read_text(), original)
+            before = {path: path.read_text() for path in (keys, bspwm, xinit)}
+            keybindings.configure_user(home)
+            self.assertEqual(before, {path: path.read_text() for path in before})
+            self.assertEqual(len(list((home / 'dotfiles-backups').iterdir())), 1)
+
+    def test_gui_adds_lock_binding_on_win_and_keeps_it_on_repeat(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             keys = home / '.config/sxhkd/sxhkdrc'
             keys.parent.mkdir(parents=True)
             keys.write_text('alt + Return\n    alacritty\n')
             graphical.configure_user(home)
-            self.assertIn('mod5 + shift + l\n    "$HOME/bin/screen-lock"', keys.read_text())
+            self.assertIn('mod4 + shift + l\n    "$HOME/bin/screen-lock"', keys.read_text())
             self.assertEqual(keys.read_text().count('bin/screen-lock'), 1)
             before = keys.read_text()
             graphical.configure_user(home)
@@ -626,7 +654,7 @@ super + {grave,Tab}
                                       Path('/usr/local/libexec/arch-greeter-layout')})
         for text, mode in paths.values():
             self.assertIn('grp:lalt_lshift_toggle', text)
-            self.assertIn('lv3:ralt_switch', text)
+            self.assertNotIn('lv3:ralt_switch', text)
             self.assertNotIn('grp:toggle', text)
             self.assertNotIn('grp:alt_shift_toggle', text)
         command.assert_not_called()
@@ -639,10 +667,10 @@ super + {grave,Tab}
              patch.object(keybindings, 'run', return_value=0) as command:
             keybindings.setup()
         calls = [call.args[0] for call in command.call_args_list]
-        self.assertIn(['bspc', 'config', 'pointer_modifier', 'mod5'], calls)
+        self.assertIn(['bspc', 'config', 'pointer_modifier', 'mod4'], calls)
         self.assertIn(['pkill', '-USR1', '-u', '1000', '-x', 'sxhkd'], calls)
         keyboard = ['setxkbmap', '-layout', 'us,ru', '-option', '',
-                    '-option', 'grp:lalt_lshift_toggle', '-option', 'lv3:ralt_switch']
+                    '-option', 'grp:lalt_lshift_toggle']
         self.assertIn(keyboard, calls)
         self.assertFalse(any('restart' in args or 'wm' in args for args in calls))
 

@@ -1,4 +1,4 @@
-"""Use Right Alt for BSPWM and Left Alt+Left Shift for US/RU."""
+"""Use Win for BSPWM and Left Alt+Left Shift for US/RU."""
 from datetime import datetime
 from pathlib import Path
 import os
@@ -9,12 +9,11 @@ import sys
 
 from arch_setup import HERE, run, write
 
-# Keep Right Alt on Mod5 (AltGr), separate from Left Alt's Mod1. Both sxhkd
-# and bspwm accept Mod5, so no firmware remapping or extra package is needed.
-SHORTCUT_MODIFIER = 'mod5'
+# Win uses Mod4 in both sxhkd and bspwm. Migrate the previous Alt/AltGr
+# bindings as well, without touching command text or resetting US/RU.
+SHORTCUT_MODIFIER = 'mod4'
 LAYOUT_OPTION = 'grp:lalt_lshift_toggle'
-LAYOUT_ARGS = ['setxkbmap', '-layout', 'us,ru', '-option', '',
-               '-option', LAYOUT_OPTION, '-option', 'lv3:ralt_switch']
+LAYOUT_ARGS = ['setxkbmap', '-layout', 'us,ru', '-option', '', '-option', LAYOUT_OPTION]
 LAYOUT_COMMAND = shlex.join(LAYOUT_ARGS)
 
 
@@ -28,7 +27,7 @@ def alt_hotkeys(text):
         if line and not line[0].isspace() and not line.startswith('#'):
             if re.search(r'\b(super|mod4)\b', line):
                 # Preserve the extra modifier in Win+Alt directions without
-                # colliding with Alt+Shift+L (lock) or Alt+Ctrl+H/J/K/L (resize).
+                # colliding with Win+Shift+L (lock) or Win+Ctrl+H/J/K/L (resize).
                 line = re.sub(r'\balt\b', 'ctrl + shift', line)
                 line = re.sub(r'\b(super|mod4)\b', 'alt', line)
                 # Keep the existing Alt+Tab window cycle distinct from Win+Tab's
@@ -39,7 +38,7 @@ def alt_hotkeys(text):
                 # A hotkey has one keysym: Escape cannot also be a modifier.
                 line = re.sub(r'^alt[ \t]*\+[ \t]*Escape[ \t]*\+[ \t]*r(?=[ \t]*$)',
                               'alt + Escape', line.rstrip('\n')) + ('\n' if line.endswith('\n') else '')
-            line = re.sub(r'\b(alt|mod1)\b', SHORTCUT_MODIFIER, line)
+            line = re.sub(r'\b(alt|mod1|mod5)\b', SHORTCUT_MODIFIER, line)
         elif line[:1].isspace() and not line.lstrip().startswith('#'):
             # Upstream launchers replace US/RU with US alone. Keeping the XKB
             # toggle option cannot help once only one layout remains loaded.
@@ -111,4 +110,4 @@ def setup():
         run(LAYOUT_ARGS)
         run(['bspc', 'config', 'pointer_modifier', SHORTCUT_MODIFIER])
         run(['pkill', '-USR1', '-u', str(os.geteuid()), '-x', 'sxhkd'], check=False)
-    print('Бинды: правый Alt. Раскладка US/RU: левый Alt+левый Shift. В TTY изменения применятся при следующем входе в BSPWM.')
+    print('Бинды: Win. Раскладка US/RU: левый Alt+левый Shift. В TTY изменения применятся при следующем входе в BSPWM.')

@@ -199,7 +199,7 @@ def setup(*, install_packages=True):
     configure_user(Path.home())
     configure_hotkeys(Path.home())
     print('Графический вход готов. При следующей загрузке выберите сеанс Arch BSPWM.')
-    print('Правый Alt+Shift+L откроет экран входа с паролем после входа через LightDM. Раскладка: левый Alt+левый Shift.')
+    print('Win+Shift+L откроет экран входа с паролем после входа через LightDM. Раскладка: левый Alt+левый Shift.')
     print('Сохраните работу и перезагрузитесь, когда будет удобно.')
 
 
