@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.log
+*.key
+*.pem
+*.cer
+*.der
+*.efi
+*.deb
+.state/
