@@ -121,6 +121,68 @@ class DiskSafety(unittest.TestCase):
                 app.validate_target(disk)
 
 
+class MokVerification(unittest.TestCase):
+    cert = '/etc/secureboot/MOK.cer'
+
+    def check_result(self, code, message, stderr=''):
+        result = subprocess.CompletedProcess([], code, message, stderr)
+        with patch.object(app.subprocess, 'run', return_value=result) as command, \
+             patch('sys.stdout', new_callable=io.StringIO), \
+             patch('sys.stderr', new_callable=io.StringIO):
+            enrolled = app.mok_enrolled()
+        self.assertEqual(command.call_args.args[0], ['mokutil', '--test-key', self.cert])
+        self.assertEqual(command.call_args.kwargs['env']['LC_ALL'], 'C')
+        return enrolled
+
+    def test_enrolled_key_with_old_and_new_exit_codes(self):
+        for code in (0, 1):
+            with self.subTest(code=code):
+                self.assertTrue(self.check_result(code, f'{self.cert} is already enrolled\n'))
+
+    def test_missing_pending_blocked_or_different_key_never_passes(self):
+        for code in (0, 1):
+            for message in ('is not enrolled', 'is already in the enrollment request',
+                            'is blocked in dbx', 'is blocked in MokListX', 'is already in db'):
+                with self.subTest(code=code, message=message):
+                    self.assertFalse(self.check_result(code, f'{self.cert} {message}\n'))
+            self.assertFalse(self.check_result(code, '/other/key.cer is already enrolled\n'))
+
+    def test_command_failure_or_unknown_output_never_passes(self):
+        self.assertFalse(self.check_result(255, '', 'Failed to open certificate\n'))
+        self.assertFalse(self.check_result(1, '', 'EFI variables are not supported\n'))
+        self.assertFalse(self.check_result(0, 'unexpected output\n'))
+        self.assertFalse(self.check_result(255, f'{self.cert} is already enrolled\n'))
+
+    def test_verify_still_checks_mok_and_image_signatures(self):
+        state = {'esp_uuid': '1234-ABCD', 'pool_guid': '42'}
+
+        def command(args, **kwargs):
+            if args[0] == 'sbverify':
+                return 1 if failed_signatures else 0
+            if args[0] == 'findmnt':
+                return {'/boot': state['esp_uuid'], '/': zfs_support.ROOT,
+                        '/home': zfs_support.HOME}[args[-1]]
+            if args[:2] == ['zpool', 'get']:
+                return '42' if args[-2] == 'guid' else 'ONLINE'
+            return 0
+
+        for enrolled, failed_signatures in ((True, False), (False, False), (True, True)):
+            with self.subTest(enrolled=enrolled, failed_signatures=failed_signatures), \
+                 patch.object(app, 'root_required'), \
+                 patch.object(app, 'load_state', return_value=state), \
+                 patch.object(app, 'secureboot_enabled', return_value=True), \
+                 patch.object(app, 'mok_enrolled', return_value=enrolled) as mok, \
+                 patch.object(app, 'run', side_effect=command) as run, \
+                 patch('sys.stdout', new_callable=io.StringIO):
+                if not enrolled or failed_signatures:
+                    with self.assertRaisesRegex(RuntimeError, 'sbverify' if failed_signatures else 'mokutil'):
+                        app.verify()
+                else:
+                    app.verify()
+                mok.assert_called_once_with()
+                self.assertEqual(sum(call.args[0][0] == 'sbverify' for call in run.call_args_list), 2)
+
+
 class BootFiles(unittest.TestCase):
     def test_signed_update_hooks_and_shell_syntax(self):
         with tempfile.TemporaryDirectory() as directory:

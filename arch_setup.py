@@ -511,14 +511,29 @@ def desktop():
     print('\nОкружение готово. Из локальной консоли выполните startx. Хоткеи — в README.')
 
 
+def mok_enrolled(cert='/etc/secureboot/MOK.cer'):
+    cert = str(cert)
+    args = ['mokutil', '--test-key', cert]
+    print('+', ' '.join(args), flush=True)
+    result = subprocess.run(args, text=True, capture_output=True, check=False,
+                            env={**os.environ, 'LC_ALL': 'C'})
+    print(result.stdout, end='')
+    print(result.stderr, end='', file=sys.stderr)
+    # 0.7.2 returns 1 for enrolled keys, newer code returns 0. Both versions
+    # also use these codes for pending/blocked keys; require actual enrollment.
+    return (result.returncode in (0, 1)
+            and result.stdout.strip() == f'{cert} is already enrolled')
+
+
 def verify():
     root_required()
     state = load_state()
     failures = []
     if not secureboot_enabled():
         failures.append('Secure Boot пока OFF; для конечной проверки включите его в UEFI.')
+    if not mok_enrolled():
+        failures.append('Не пройдена проверка: mokutil')
     for args in (
-        ['mokutil', '--test-key', '/etc/secureboot/MOK.cer'],
         ['sbverify', '--cert', '/etc/secureboot/MOK.pem', '/boot/EFI/refind/grubx64.efi'],
         ['sbverify', '--cert', '/etc/secureboot/MOK.pem', '/boot/EFI/Linux/arch-linux.efi'],
     ):
